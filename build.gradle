@@ -1,6 +1,5 @@
 plugins {
     id 'java'
-    id 'war'
     id 'org.springframework.boot' version '4.0.6'
     id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -20,21 +19,28 @@ repositories {
 }
 
 dependencies {
+    // Web（REST API）
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // JPA + Hibernate（ORM）
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 
-    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
-    compileOnly 'org.projectlombok:lombok'
-    developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
-    annotationProcessor 'org.projectlombok:lombok'
-    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
-    providedRuntime 'org.springframework.boot:spring-boot-starter-tomcat-runtime'
-    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
-
+    // PostgreSQL driver
     runtimeOnly 'org.postgresql:postgresql'
-    testCompileOnly 'org.projectlombok:lombok'
+
+    // Lombok（可選但推薦）
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // devtools（可選）
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+    // Docker Compose（本地開發用）
+    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
+
+    // 測試
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
 tasks.named('test') {
