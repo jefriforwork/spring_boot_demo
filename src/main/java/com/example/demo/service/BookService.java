@@ -1,6 +1,7 @@
 package com.example.demo.service;
 
 import com.example.demo.entity.Book;
+import com.example.demo.exception.DuplicateBookNameException;
 import com.example.demo.repository.BookRepository;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +17,9 @@ public class BookService {
     }
 
     public Book createBook(String name, String author) {
+        if (bookRepository.existsByName(name)) {
+            throw new DuplicateBookNameException(name);
+        }
         return bookRepository.save(new Book(name, author));
     }
 
