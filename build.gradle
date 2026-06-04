@@ -28,6 +28,10 @@ dependencies {
     // PostgreSQL driver
     runtimeOnly 'org.postgresql:postgresql'
 
+    // Flyway（資料庫版本遷移）
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+
     // Lombok（可選但推薦）
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
