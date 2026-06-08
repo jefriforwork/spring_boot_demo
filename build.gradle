@@ -39,8 +39,9 @@ dependencies {
     // devtools（可選）
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
-    // Docker Compose（本地開發用）
-    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
+    // Redis + Spring Cache
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
 
     // 測試
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
