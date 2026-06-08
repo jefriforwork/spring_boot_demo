@@ -1,14 +1,14 @@
 package com.example.demo.controller;
 
+import com.example.demo.dto.BookRequest;
 import com.example.demo.service.BookService;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 @RestController
+@RequestMapping("/books")
 public class BookController {
 
     private final BookService bookService;
@@ -17,13 +17,28 @@ public class BookController {
         this.bookService = bookService;
     }
 
-    @PostMapping("/books")
-    public Map<String, Object> createBook(@RequestParam String name, @RequestParam String author) {
-        return bookService.createBook(name, author);
+    @PostMapping
+    public Map<String, Object> createBook(@Valid @RequestBody BookRequest request) {
+        return bookService.createBook(request);
     }
 
-    @GetMapping("/books")
+    @GetMapping
     public Map<String, Object> getAllBooks() {
         return bookService.getAllBooks();
+    }
+
+    @GetMapping("/{id}")
+    public Map<String, Object> getBookById(@PathVariable Long id) {
+        return bookService.getBookById(id);
+    }
+
+    @PutMapping("/{id}")
+    public Map<String, Object> updateBook(@PathVariable Long id, @Valid @RequestBody BookRequest request) {
+        return bookService.updateBook(id, request);
+    }
+
+    @DeleteMapping("/{id}")
+    public Map<String, Object> deleteBook(@PathVariable Long id) {
+        return bookService.deleteBook(id);
     }
 }
