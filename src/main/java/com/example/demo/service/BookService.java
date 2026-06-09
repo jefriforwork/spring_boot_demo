@@ -5,23 +5,27 @@ import com.example.demo.dto.BookRequest;
 import com.example.demo.entity.Book;
 import com.example.demo.exception.DuplicateBookNameException;
 import com.example.demo.exception.ResourceNotFoundException;
+import com.example.demo.kafka.KafkaProducer;
 import com.example.demo.repository.BookRepository;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @Service
 public class BookService {
 
     private final BookRepository bookRepository;
+    private final KafkaProducer kafkaProducer;
 
-    public BookService(BookRepository bookRepository) {
+    public BookService(BookRepository bookRepository, KafkaProducer kafkaProducer) {
         this.bookRepository = bookRepository;
+        this.kafkaProducer = kafkaProducer;
     }
 
     @Transactional
@@ -31,6 +35,7 @@ public class BookService {
             throw new DuplicateBookNameException(request.getName());
         }
         Book book = bookRepository.save(new Book(request.getName(), request.getAuthor()));
+        kafkaProducer.send("book-events", "新書上架: " + book.getName());
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
         result.put("data", book);
@@ -38,12 +43,19 @@ public class BookService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "books", key = "'all'")
-    public Map<String, Object> getAllBooks() {
-        List<Book> books = bookRepository.findAll();
+    public Map<String, Object> getAllBooks(Pageable pageable) {
+        Page<Book> page = bookRepository.findAll(pageable);
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", DbContextHolder.isReadOnly() ? "replica (port 5433)" : "primary (port 5432)");
-        result.put("data", books);
+        result.put("data", page.getContent());
+        result.put("pagination", Map.of(
+                "page", page.getNumber(),
+                "size", page.getSize(),
+                "totalElements", page.getTotalElements(),
+                "totalPages", page.getTotalPages(),
+                "first", page.isFirst(),
+                "last", page.isLast()
+        ));
         return result;
     }
 
@@ -85,6 +97,7 @@ public class BookService {
             throw new ResourceNotFoundException("Book", id);
         }
         bookRepository.deleteById(id);
+        kafkaProducer.send("book-events", "書本已刪除: id=" + id);
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
         result.put("message", "Book deleted successfully");
