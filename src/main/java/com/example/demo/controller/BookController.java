@@ -3,7 +3,6 @@ package com.example.demo.controller;
 import com.example.demo.dto.BookRequest;
 import com.example.demo.service.BookService;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -30,11 +29,13 @@ public class BookController {
     public Map<String, Object> getAllBooks(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "id,asc") String[] sort) {
+            @RequestParam(defaultValue = "id,asc") String[] sort,
+            @RequestParam(required = false) String country,
+            @RequestParam(required = false) String keyword) {
 
         Sort.Direction direction = Sort.Direction.fromString(sort[1]);
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sort[0]));
-        return bookService.getAllBooks(pageable);
+        return bookService.getAllBooks(pageable, country, keyword);
     }
 
     @GetMapping("/{id}")

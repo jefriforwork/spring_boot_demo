@@ -1,6 +1,7 @@
 package com.example.demo.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 public class BookRequest {
@@ -9,9 +10,8 @@ public class BookRequest {
     @Size(max = 255, message = "name must be at most 255 characters")
     private String name;
 
-    @NotBlank(message = "author must not be blank")
-    @Size(max = 255, message = "author must be at most 255 characters")
-    private String author;
+    @NotNull(message = "authorId must not be null")
+    private Long authorId;
 
     public String getName() {
         return name;
@@ -21,11 +21,11 @@ public class BookRequest {
         this.name = name;
     }
 
-    public String getAuthor() {
-        return author;
+    public Long getAuthorId() {
+        return authorId;
     }
 
-    public void setAuthor(String author) {
-        this.author = author;
+    public void setAuthorId(Long authorId) {
+        this.authorId = authorId;
     }
 }

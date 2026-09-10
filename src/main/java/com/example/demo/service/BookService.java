@@ -2,10 +2,12 @@ package com.example.demo.service;
 
 import com.example.demo.config.DbContextHolder;
 import com.example.demo.dto.BookRequest;
+import com.example.demo.entity.Author;
 import com.example.demo.entity.Book;
 import com.example.demo.exception.DuplicateBookNameException;
 import com.example.demo.exception.ResourceNotFoundException;
 import com.example.demo.kafka.KafkaProducer;
+import com.example.demo.repository.AuthorRepository;
 import com.example.demo.repository.BookRepository;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -21,10 +23,12 @@ import java.util.Map;
 public class BookService {
 
     private final BookRepository bookRepository;
+    private final AuthorRepository authorRepository;
     private final KafkaProducer kafkaProducer;
 
-    public BookService(BookRepository bookRepository, KafkaProducer kafkaProducer) {
+    public BookService(BookRepository bookRepository, AuthorRepository authorRepository, KafkaProducer kafkaProducer) {
         this.bookRepository = bookRepository;
+        this.authorRepository = authorRepository;
         this.kafkaProducer = kafkaProducer;
     }
 
@@ -34,7 +38,8 @@ public class BookService {
         if (bookRepository.existsByName(request.getName())) {
             throw new DuplicateBookNameException(request.getName());
         }
-        Book book = bookRepository.save(new Book(request.getName(), request.getAuthor()));
+        Author author = findAuthor(request.getAuthorId());
+        Book book = bookRepository.save(new Book(request.getName(), author));
         kafkaProducer.send("book-events", "新書上架: " + book.getName());
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
@@ -43,20 +48,18 @@ public class BookService {
     }
 
     @Transactional(readOnly = true)
-    public Map<String, Object> getAllBooks(Pageable pageable) {
-        Page<Book> page = bookRepository.findAll(pageable);
-        Map<String, Object> result = new HashMap<>();
-        result.put("dataSource", DbContextHolder.isReadOnly() ? "replica (port 5433)" : "primary (port 5432)");
-        result.put("data", page.getContent());
-        result.put("pagination", Map.of(
-                "page", page.getNumber(),
-                "size", page.getSize(),
-                "totalElements", page.getTotalElements(),
-                "totalPages", page.getTotalPages(),
-                "first", page.isFirst(),
-                "last", page.isLast()
-        ));
-        return result;
+    public Map<String, Object> getAllBooks(Pageable pageable, String country, String keyword) {
+        String safeKeyword = keyword == null ? "" : keyword;
+        Page<Book> page;
+        if (country != null && !country.isBlank()) {
+            page = bookRepository.findByAuthor_CountryIgnoreCaseAndNameContainingIgnoreCase(
+                    country, safeKeyword, pageable);
+        } else if (keyword != null && !keyword.isBlank()) {
+            page = bookRepository.findByNameContainingIgnoreCase(keyword, pageable);
+        } else {
+            page = bookRepository.findAll(pageable);
+        }
+        return toPageResult(page);
     }
 
     @Transactional(readOnly = true)
@@ -81,7 +84,7 @@ public class BookService {
         }
 
         book.setName(request.getName());
-        book.setAuthor(request.getAuthor());
+        book.setAuthor(findAuthor(request.getAuthorId()));
         Book updated = bookRepository.save(book);
 
         Map<String, Object> result = new HashMap<>();
@@ -101,6 +104,26 @@ public class BookService {
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
         result.put("message", "Book deleted successfully");
+        return result;
+    }
+
+    private Author findAuthor(Long authorId) {
+        return authorRepository.findById(authorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Author", authorId));
+    }
+
+    private Map<String, Object> toPageResult(Page<Book> page) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("dataSource", DbContextHolder.isReadOnly() ? "replica (port 5433)" : "primary (port 5432)");
+        result.put("data", page.getContent());
+        result.put("pagination", Map.of(
+                "page", page.getNumber(),
+                "size", page.getSize(),
+                "totalElements", page.getTotalElements(),
+                "totalPages", page.getTotalPages(),
+                "first", page.isFirst(),
+                "last", page.isLast()
+        ));
         return result;
     }
 }

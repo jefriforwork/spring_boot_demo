@@ -12,12 +12,15 @@ public class Book {
     private Long id;
 
     private String name;
-    private String author;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "author_id", nullable = false)
+    private Author author;
 
     public Book() {
     }
 
-    public Book(String name, String author) {
+    public Book(String name, Author author) {
         this.name = name;
         this.author = author;
     }
@@ -30,7 +33,7 @@ public class Book {
         return name;
     }
 
-    public String getAuthor() {
+    public Author getAuthor() {
         return author;
     }
 
@@ -42,7 +45,7 @@ public class Book {
         this.name = name;
     }
 
-    public void setAuthor(String author) {
+    public void setAuthor(Author author) {
         this.author = author;
     }
 }
