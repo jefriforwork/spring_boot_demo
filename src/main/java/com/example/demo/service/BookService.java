@@ -26,12 +26,14 @@ public class BookService {
     private final AuthorRepository authorRepository;
     private final KafkaProducer kafkaProducer;
     private final BookCache bookCache;
+    private final TagService tagService;
 
-    public BookService(BookRepository bookRepository, AuthorRepository authorRepository, KafkaProducer kafkaProducer, BookCache bookCache) {
+    public BookService(BookRepository bookRepository, AuthorRepository authorRepository, KafkaProducer kafkaProducer, BookCache bookCache, TagService tagService) {
         this.bookRepository = bookRepository;
         this.authorRepository = authorRepository;
         this.kafkaProducer = kafkaProducer;
         this.bookCache = bookCache;
+        this.tagService = tagService;
     }
 
     @Transactional
@@ -40,7 +42,12 @@ public class BookService {
             throw new DuplicateBookNameException(request.getName());
         }
         Author author = findAuthor(request.getAuthorId());
-        Book book = bookRepository.save(new Book(request.getName(), author));
+        Book book = new Book(request.getName(), author);
+        if (request.getTags() != null) {
+            book.setTags(tagService.resolve(request.getTags()));
+        }
+        book = bookRepository.save(book);
+        prepareForResponse(book);
         kafkaProducer.send("book-events", "新書上架: " + book.getName());
         bookCache.putAfterCommit(book);
         Map<String, Object> result = new HashMap<>();
@@ -73,6 +80,7 @@ public class BookService {
 
         Book book = bookRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Book", id));
+        prepareForResponse(book);
         if (!bookCache.putIfAbsent(book)) {
             BookSnapshot winner = bookCache.get(id);
             if (winner != null) {
@@ -97,7 +105,12 @@ public class BookService {
 
         book.setName(request.getName());
         book.setAuthor(findAuthor(request.getAuthorId()));
+        if (request.getTags() != null) {
+            book.getTags().clear();
+            book.getTags().addAll(tagService.resolve(request.getTags()));
+        }
         Book updated = bookRepository.save(book);
+        prepareForResponse(updated);
         bookCache.putAfterCommit(updated);
 
         Map<String, Object> result = new HashMap<>();
@@ -118,6 +131,11 @@ public class BookService {
         result.put("dataSource", "primary (port 5432)");
         result.put("message", "Book deleted successfully");
         return result;
+    }
+
+    private void prepareForResponse(Book book) {
+        book.getTags().size();
+        book.getAuthor().getTags().size();
     }
 
     private Map<String, Object> toCachedResult(Long id, BookSnapshot cached) {

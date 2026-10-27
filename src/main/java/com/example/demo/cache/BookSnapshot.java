@@ -2,6 +2,12 @@ package com.example.demo.cache;
 
 import com.example.demo.entity.Author;
 import com.example.demo.entity.Book;
+import com.example.demo.entity.Tag;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 public class BookSnapshot {
 
@@ -10,6 +16,8 @@ public class BookSnapshot {
     private Long authorId;
     private String authorName;
     private String authorCountry;
+    private List<String> authorTags = new ArrayList<>();
+    private List<String> tags = new ArrayList<>();
     private boolean deleted;
 
     public BookSnapshot() {
@@ -23,6 +31,8 @@ public class BookSnapshot {
         snapshot.setAuthorId(author.getId());
         snapshot.setAuthorName(author.getName());
         snapshot.setAuthorCountry(author.getCountry());
+        snapshot.setAuthorTags(namesOf(author.getTags()));
+        snapshot.setTags(namesOf(book.getTags()));
         snapshot.setDeleted(false);
         return snapshot;
     }
@@ -37,9 +47,29 @@ public class BookSnapshot {
     public Book toBook() {
         Author author = new Author(authorName, authorCountry);
         author.setId(authorId);
+        author.setTags(asTags(authorTags));
         Book book = new Book(name, author);
         book.setId(id);
+        book.setTags(asTags(tags));
         return book;
+    }
+
+    private static List<String> namesOf(Set<Tag> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return tags.stream().map(Tag::getName).sorted().toList();
+    }
+
+    private static Set<Tag> asTags(List<String> names) {
+        Set<Tag> tags = new LinkedHashSet<>();
+        if (names == null) {
+            return tags;
+        }
+        for (String name : names) {
+            tags.add(new Tag(name));
+        }
+        return tags;
     }
 
     public Long getId() {
@@ -80,6 +110,22 @@ public class BookSnapshot {
 
     public void setAuthorCountry(String authorCountry) {
         this.authorCountry = authorCountry;
+    }
+
+    public List<String> getAuthorTags() {
+        return authorTags;
+    }
+
+    public void setAuthorTags(List<String> authorTags) {
+        this.authorTags = authorTags;
+    }
+
+    public List<String> getTags() {
+        return tags;
+    }
+
+    public void setTags(List<String> tags) {
+        this.tags = tags;
     }
 
     public boolean isDeleted() {

@@ -14,17 +14,17 @@ public interface BookRepository extends JpaRepository<Book, Long> {
     Optional<Book> findByName(String name);
 
     @Override
-    @EntityGraph(attributePaths = "author")
+    @EntityGraph(attributePaths = {"author", "author.tags", "tags"})
     Page<Book> findAll(Pageable pageable);
 
     @Override
-    @EntityGraph(attributePaths = "author")
+    @EntityGraph(attributePaths = {"author", "author.tags", "tags"})
     Optional<Book> findById(Long id);
 
-    @EntityGraph(attributePaths = "author")
+    @EntityGraph(attributePaths = {"author", "author.tags", "tags"})
     Page<Book> findByNameContainingIgnoreCase(String name, Pageable pageable);
 
-    @EntityGraph(attributePaths = "author")
+    @EntityGraph(attributePaths = {"author", "author.tags", "tags"})
     Page<Book> findByAuthor_CountryIgnoreCaseAndNameContainingIgnoreCase(
             String country, String name, Pageable pageable);
 }

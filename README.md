@@ -38,10 +38,16 @@ Spring Boot 書籍與作者 REST API。寫入走 PostgreSQL 主庫，讀取走�
 docker compose up -d
 ```
 
-等主庫健康檢查通過後，從庫才會用 `pg_basebackup` 接上串流複製。確認容器都在跑：
+等主庫健康檢查通過後，從庫才會用 `pg_basebackup` 接上串流複製。你下這條指令的當下，會一併啟動 ZooKeeper（`2181`）和 Kafka（`9092`）。指令結束後 Compose 就不再看著它們；Kafka 若自己退出，不會自動再拉起來。確認容器都在跑：
 
 ```bash
 docker compose ps
+```
+
+`kafka` 或 `zookeeper` 顯示 `Exited` 時，應用不會把它們拉起來。只啟動這兩個：
+
+```bash
+docker compose start zookeeper kafka
 ```
 
 再啟動應用（預設 `http://localhost:8080`）：
@@ -56,7 +62,11 @@ docker compose ps
 ./gradlew test
 ```
 
-停止基礎服務：
+## 停止
+
+先停應用，再停容器。`./gradlew bootRun` 佔著那個終端機，在**同一個視窗**按 `Ctrl+C`，等到 Gradle 印出 `BUILD SUCCESSFUL`（或行程結束）再繼續。只執行 `docker compose down` 不會關掉 8080 上的 Spring Boot。
+
+容器（PostgreSQL、Redis、Kafka、ZooKeeper）：
 
 ```bash
 docker compose down
@@ -67,6 +77,51 @@ docker compose down
 ```bash
 docker compose down -v
 ```
+
+終端機已經關掉、`Ctrl+C` 按不到時，查出佔用 8080 的行程再停掉：
+
+```bash
+lsof -nP -iTCP:8080 -sTCP:LISTEN
+kill <PID>
+```
+
+`<PID>` 換成上一行輸出的行程編號。停不掉再改用 `kill -9 <PID>`。
+
+## Kafka 沒起來
+
+建立書籍和刪除書籍會送 topic `book-events`。`9092` 沒有在聽時，請求會空等約 60 秒，然後回 500。`GET /books` 不送 Kafka。
+
+看容器狀態與日誌：
+
+```bash
+docker compose ps
+docker logs kafka --tail 50
+```
+
+日誌若出現 `NodeExists` 或 `/brokers/ids/1`，ZooKeeper 裡還留著舊的 broker 註冊。先重啟 ZooKeeper 清掉那筆註冊，再啟動 Kafka：
+
+```bash
+docker restart zookeeper
+docker start kafka
+```
+
+`docker ps` 裡 `kafka` 是 `Up`，且本機能連上 `localhost:9092`，再重新建立書籍。
+
+## Debug
+
+一般的 `./gradlew bootRun` 不會停在 breakpoint。要改用 debug 模式，讓 debugger 接上 JVM 的 `5005`。
+
+1. 在跑 `bootRun` 的終端機按 `Ctrl+C`，先停掉現在的應用。
+2. 在編輯器裡點行號左側設 breakpoint。例如 `BookService.createBook` 裡的 `kafkaProducer.send(...)`。
+3. 用 debug 模式啟動。行程會先停住，等到 debugger 接上才繼續：
+
+```bash
+./gradlew bootRun --debug-jvm
+```
+
+4. 終端機出現 `Listening for transport dt_socket at address: 5005` 後，在 Cursor 或 IntelliJ 新增 **Attach** 設定，主機 `localhost`、埠 `5005`，再開始偵錯。
+5. 對 `http://localhost:8080` 發請求。執行到 breakpoint 會停下，可以看變數、單步執行。
+6. 停止方式和一般啟動相同：在 `bootRun` 的終端機按 `Ctrl+C`。
 
 ## 連線（本機示範）
 
