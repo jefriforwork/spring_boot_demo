@@ -1,5 +1,7 @@
 package com.example.demo.service;
 
+import com.example.demo.cache.BookCache;
+import com.example.demo.cache.BookSnapshot;
 import com.example.demo.config.DbContextHolder;
 import com.example.demo.dto.BookRequest;
 import com.example.demo.entity.Author;
@@ -9,8 +11,6 @@ import com.example.demo.exception.ResourceNotFoundException;
 import com.example.demo.kafka.KafkaProducer;
 import com.example.demo.repository.AuthorRepository;
 import com.example.demo.repository.BookRepository;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -25,15 +25,16 @@ public class BookService {
     private final BookRepository bookRepository;
     private final AuthorRepository authorRepository;
     private final KafkaProducer kafkaProducer;
+    private final BookCache bookCache;
 
-    public BookService(BookRepository bookRepository, AuthorRepository authorRepository, KafkaProducer kafkaProducer) {
+    public BookService(BookRepository bookRepository, AuthorRepository authorRepository, KafkaProducer kafkaProducer, BookCache bookCache) {
         this.bookRepository = bookRepository;
         this.authorRepository = authorRepository;
         this.kafkaProducer = kafkaProducer;
+        this.bookCache = bookCache;
     }
 
     @Transactional
-    @CacheEvict(value = "books", allEntries = true)
     public Map<String, Object> createBook(BookRequest request) {
         if (bookRepository.existsByName(request.getName())) {
             throw new DuplicateBookNameException(request.getName());
@@ -41,6 +42,7 @@ public class BookService {
         Author author = findAuthor(request.getAuthorId());
         Book book = bookRepository.save(new Book(request.getName(), author));
         kafkaProducer.send("book-events", "新書上架: " + book.getName());
+        bookCache.putAfterCommit(book);
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
         result.put("data", book);
@@ -63,10 +65,21 @@ public class BookService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "books", key = "#id")
     public Map<String, Object> getBookById(Long id) {
+        BookSnapshot cached = bookCache.get(id);
+        if (cached != null) {
+            return toCachedResult(id, cached);
+        }
+
         Book book = bookRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Book", id));
+        if (!bookCache.putIfAbsent(book)) {
+            BookSnapshot winner = bookCache.get(id);
+            if (winner != null) {
+                return toCachedResult(id, winner);
+            }
+        }
+
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", DbContextHolder.isReadOnly() ? "replica (port 5433)" : "primary (port 5432)");
         result.put("data", book);
@@ -74,7 +87,6 @@ public class BookService {
     }
 
     @Transactional
-    @CacheEvict(value = "books", allEntries = true)
     public Map<String, Object> updateBook(Long id, BookRequest request) {
         Book book = bookRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Book", id));
@@ -86,6 +98,7 @@ public class BookService {
         book.setName(request.getName());
         book.setAuthor(findAuthor(request.getAuthorId()));
         Book updated = bookRepository.save(book);
+        bookCache.putAfterCommit(updated);
 
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
@@ -94,16 +107,26 @@ public class BookService {
     }
 
     @Transactional
-    @CacheEvict(value = "books", allEntries = true)
     public Map<String, Object> deleteBook(Long id) {
         if (!bookRepository.existsById(id)) {
             throw new ResourceNotFoundException("Book", id);
         }
         bookRepository.deleteById(id);
         kafkaProducer.send("book-events", "書本已刪除: id=" + id);
+        bookCache.markDeletedAfterCommit(id);
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
         result.put("message", "Book deleted successfully");
+        return result;
+    }
+
+    private Map<String, Object> toCachedResult(Long id, BookSnapshot cached) {
+        if (cached.isDeleted()) {
+            throw new ResourceNotFoundException("Book", id);
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("dataSource", "cache");
+        result.put("data", cached.toBook());
         return result;
     }
 
