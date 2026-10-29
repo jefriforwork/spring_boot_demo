@@ -8,6 +8,7 @@ import com.example.demo.entity.Author;
 import com.example.demo.entity.Book;
 import com.example.demo.exception.DuplicateBookNameException;
 import com.example.demo.exception.ResourceNotFoundException;
+import com.example.demo.kafka.BookEvent;
 import com.example.demo.kafka.KafkaProducer;
 import com.example.demo.repository.AuthorRepository;
 import com.example.demo.repository.BookRepository;
@@ -48,7 +49,7 @@ public class BookService {
         }
         book = bookRepository.save(book);
         prepareForResponse(book);
-        kafkaProducer.send("book-events", "新書上架: " + book.getName());
+        kafkaProducer.send(BookEvent.created(book.getId(), book.getName()));
         bookCache.putAfterCommit(book);
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
@@ -125,7 +126,7 @@ public class BookService {
             throw new ResourceNotFoundException("Book", id);
         }
         bookRepository.deleteById(id);
-        kafkaProducer.send("book-events", "書本已刪除: id=" + id);
+        kafkaProducer.send(BookEvent.deleted(id));
         bookCache.markDeletedAfterCommit(id);
         Map<String, Object> result = new HashMap<>();
         result.put("dataSource", "primary (port 5432)");
