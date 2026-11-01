@@ -1,6 +1,10 @@
 package com.example.demo.controller;
 
+import com.example.demo.dto.BookPageResponse;
 import com.example.demo.dto.BookRequest;
+import com.example.demo.dto.BookResponse;
+import com.example.demo.dto.MessageResponse;
+import com.example.demo.dto.ReadResponse;
 import com.example.demo.service.BookService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.PageRequest;
@@ -8,10 +12,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 @RestController
-@RequestMapping("/books")
+@RequestMapping("/api/v1/books")
 public class BookController {
 
     private final BookService bookService;
@@ -21,12 +23,12 @@ public class BookController {
     }
 
     @PostMapping
-    public Map<String, Object> createBook(@Valid @RequestBody BookRequest request) {
+    public ReadResponse<BookResponse> createBook(@Valid @RequestBody BookRequest request) {
         return bookService.createBook(request);
     }
 
     @GetMapping
-    public Map<String, Object> getAllBooks(
+    public BookPageResponse getAllBooks(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "id,asc") String[] sort,
@@ -39,17 +41,17 @@ public class BookController {
     }
 
     @GetMapping("/{id}")
-    public Map<String, Object> getBookById(@PathVariable Long id) {
+    public ReadResponse<BookResponse> getBookById(@PathVariable Long id) {
         return bookService.getBookById(id);
     }
 
     @PutMapping("/{id}")
-    public Map<String, Object> updateBook(@PathVariable Long id, @Valid @RequestBody BookRequest request) {
+    public ReadResponse<BookResponse> updateBook(@PathVariable Long id, @Valid @RequestBody BookRequest request) {
         return bookService.updateBook(id, request);
     }
 
     @DeleteMapping("/{id}")
-    public Map<String, Object> deleteBook(@PathVariable Long id) {
+    public MessageResponse deleteBook(@PathVariable Long id) {
         return bookService.deleteBook(id);
     }
 }
