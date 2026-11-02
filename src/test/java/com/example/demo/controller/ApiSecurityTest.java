@@ -173,6 +173,24 @@ class ApiSecurityTest {
     }
 
     @Test
+    void healthAndPrometheusWithoutTokenAreNotRejected() throws Exception {
+        // This slice does not load Actuator, so a permitted path has no handler.
+        // 500 means security let the request through. A locked path returns 401 below.
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().is5xxServerError());
+        mockMvc.perform(get("/actuator/health/liveness"))
+                .andExpect(status().is5xxServerError());
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().is5xxServerError());
+    }
+
+    @Test
+    void otherActuatorEndpointsWithoutTokenAreUnauthorized() throws Exception {
+        mockMvc.perform(get("/actuator/env"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void loginRejectsInvalidCredentials() throws Exception {
         when(authService.login(any())).thenThrow(new InvalidCredentialsException());
 

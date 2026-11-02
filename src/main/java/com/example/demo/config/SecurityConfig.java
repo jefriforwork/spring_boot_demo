@@ -61,6 +61,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/v1/books/*").hasRole("STAFF")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/books/*").hasRole("STAFF")
                         .requestMatchers("/api/v1/authors", "/api/v1/authors/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**", "/actuator/prometheus").permitAll()
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .authenticationEntryPoint(authenticationEntryPoint)

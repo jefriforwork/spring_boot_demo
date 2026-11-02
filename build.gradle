@@ -56,6 +56,12 @@ dependencies {
     // 邀請信
     implementation 'org.springframework.boot:spring-boot-starter-mail'
 
+    // 健康檢查、Prometheus 指標、請求 trace id（先寫進 log，不送到外部追蹤後端）
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'org.springframework.boot:spring-boot-micrometer-tracing-opentelemetry'
+    implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+
     // 測試
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
