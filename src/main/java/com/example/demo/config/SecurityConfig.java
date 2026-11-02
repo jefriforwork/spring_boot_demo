@@ -37,7 +37,7 @@ import java.nio.charset.StandardCharsets;
 
 @Configuration
 @EnableWebSecurity
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, InviteProperties.class})
 public class SecurityConfig {
 
     @Bean
@@ -53,7 +53,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/accept-invite").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/invites").hasRole("STAFF")
                         .requestMatchers(HttpMethod.GET, "/api/v1/books", "/api/v1/books/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/book-notifications").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/books").hasRole("STAFF")

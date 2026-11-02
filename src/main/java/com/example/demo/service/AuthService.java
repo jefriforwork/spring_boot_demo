@@ -1,10 +1,17 @@
 package com.example.demo.service;
 
 import com.example.demo.config.JwtProperties;
+import com.example.demo.dto.AcceptInviteRequest;
+import com.example.demo.dto.AccountResponse;
 import com.example.demo.dto.LoginRequest;
 import com.example.demo.dto.LoginResponse;
+import com.example.demo.dto.ReadResponse;
+import com.example.demo.entity.Invite;
 import com.example.demo.entity.User;
+import com.example.demo.exception.DuplicateUsernameException;
 import com.example.demo.exception.InvalidCredentialsException;
+import com.example.demo.exception.InvalidInviteException;
+import com.example.demo.repository.InviteRepository;
 import com.example.demo.repository.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -21,7 +28,10 @@ import java.util.List;
 @Service
 public class AuthService {
 
+    private static final String PRIMARY = "primary (port 5432)";
+
     private final UserRepository userRepository;
+    private final InviteRepository inviteRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtEncoder jwtEncoder;
     private final JwtProperties jwtProperties;
@@ -29,10 +39,12 @@ public class AuthService {
 
     public AuthService(
             UserRepository userRepository,
+            InviteRepository inviteRepository,
             PasswordEncoder passwordEncoder,
             JwtEncoder jwtEncoder,
             JwtProperties jwtProperties) {
         this.userRepository = userRepository;
+        this.inviteRepository = inviteRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtEncoder = jwtEncoder;
         this.jwtProperties = jwtProperties;
@@ -60,5 +72,25 @@ public class AuthService {
                 JwsHeader.with(MacAlgorithm.HS256).build(),
                 claims)).getTokenValue();
         return new LoginResponse(accessToken, "Bearer", jwtProperties.getAccessTokenTtl().toSeconds());
+    }
+
+    @Transactional
+    public ReadResponse<AccountResponse> acceptInvite(AcceptInviteRequest request) {
+        Invite invite = inviteRepository.findByTokenHash(InviteTokens.hash(request.getToken()))
+                .orElseThrow(InvalidInviteException::new);
+        Instant now = Instant.now();
+        if (invite.getConsumedAt() != null || !invite.getExpiresAt().isAfter(now)) {
+            throw new InvalidInviteException();
+        }
+        if (userRepository.existsByUsername(request.getUsername())) {
+            throw new DuplicateUsernameException(request.getUsername());
+        }
+
+        User user = userRepository.save(new User(
+                request.getUsername(),
+                passwordEncoder.encode(request.getPassword()),
+                invite.getRole()));
+        invite.setConsumedAt(now);
+        return new ReadResponse<>(PRIMARY, new AccountResponse(user.getUsername(), user.getRole().name()));
     }
 }

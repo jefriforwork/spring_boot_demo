@@ -75,6 +75,14 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: always
+
 volumes:
   pgdata_primary:
   pgdata_replica:
