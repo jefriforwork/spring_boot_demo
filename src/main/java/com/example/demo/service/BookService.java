@@ -1,5 +1,7 @@
 package com.example.demo.service;
 
+import com.example.demo.cache.BookCache;
+import com.example.demo.cache.BookSnapshot;
 import com.example.demo.config.DbContextHolder;
 import com.example.demo.dto.BookPageResponse;
 import com.example.demo.dto.BookRequest;
@@ -10,11 +12,10 @@ import com.example.demo.entity.Author;
 import com.example.demo.entity.Book;
 import com.example.demo.exception.DuplicateBookNameException;
 import com.example.demo.exception.ResourceNotFoundException;
+import com.example.demo.kafka.BookEvent;
 import com.example.demo.kafka.KafkaProducer;
 import com.example.demo.repository.AuthorRepository;
 import com.example.demo.repository.BookRepository;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -24,26 +25,40 @@ import org.springframework.transaction.annotation.Transactional;
 public class BookService {
 
     private static final String PRIMARY = "primary (port 5432)";
+    private static final String CACHE = "cache";
 
     private final BookRepository bookRepository;
     private final AuthorRepository authorRepository;
     private final KafkaProducer kafkaProducer;
+    private final BookCache bookCache;
+    private final TagService tagService;
 
-    public BookService(BookRepository bookRepository, AuthorRepository authorRepository, KafkaProducer kafkaProducer) {
+    public BookService(
+            BookRepository bookRepository,
+            AuthorRepository authorRepository,
+            KafkaProducer kafkaProducer,
+            BookCache bookCache,
+            TagService tagService) {
         this.bookRepository = bookRepository;
         this.authorRepository = authorRepository;
         this.kafkaProducer = kafkaProducer;
+        this.bookCache = bookCache;
+        this.tagService = tagService;
     }
 
     @Transactional
-    @CacheEvict(value = "books", allEntries = true)
     public ReadResponse<BookResponse> createBook(BookRequest request) {
         if (bookRepository.existsByName(request.getName())) {
             throw new DuplicateBookNameException(request.getName());
         }
         Author author = findAuthor(request.getAuthorId());
-        Book book = bookRepository.save(new Book(request.getName(), author));
-        kafkaProducer.send("book-events", "新書上架: " + book.getName());
+        Book book = new Book(request.getName(), author);
+        if (request.getTags() != null) {
+            book.setTags(tagService.resolve(request.getTags()));
+        }
+        book = bookRepository.save(book);
+        kafkaProducer.send(BookEvent.created(book.getId(), book.getName()));
+        bookCache.putAfterCommit(book);
         return new ReadResponse<>(PRIMARY, BookResponse.from(book));
     }
 
@@ -63,15 +78,24 @@ public class BookService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "books", key = "#id")
     public ReadResponse<BookResponse> getBookById(Long id) {
+        BookSnapshot cached = bookCache.get(id);
+        if (cached != null) {
+            return toCachedResult(id, cached);
+        }
+
         Book book = bookRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Book", id));
+        if (!bookCache.putIfAbsent(book)) {
+            BookSnapshot winner = bookCache.get(id);
+            if (winner != null) {
+                return toCachedResult(id, winner);
+            }
+        }
         return new ReadResponse<>(currentDataSource(), BookResponse.from(book));
     }
 
     @Transactional
-    @CacheEvict(value = "books", allEntries = true)
     public ReadResponse<BookResponse> updateBook(Long id, BookRequest request) {
         Book book = bookRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Book", id));
@@ -82,19 +106,31 @@ public class BookService {
 
         book.setName(request.getName());
         book.setAuthor(findAuthor(request.getAuthorId()));
+        if (request.getTags() != null) {
+            book.getTags().clear();
+            book.getTags().addAll(tagService.resolve(request.getTags()));
+        }
         Book updated = bookRepository.save(book);
+        bookCache.putAfterCommit(updated);
         return new ReadResponse<>(PRIMARY, BookResponse.from(updated));
     }
 
     @Transactional
-    @CacheEvict(value = "books", allEntries = true)
     public MessageResponse deleteBook(Long id) {
         if (!bookRepository.existsById(id)) {
             throw new ResourceNotFoundException("Book", id);
         }
         bookRepository.deleteById(id);
-        kafkaProducer.send("book-events", "書本已刪除: id=" + id);
+        kafkaProducer.send(BookEvent.deleted(id));
+        bookCache.markDeletedAfterCommit(id);
         return new MessageResponse(PRIMARY, "Book deleted successfully");
+    }
+
+    private ReadResponse<BookResponse> toCachedResult(Long id, BookSnapshot cached) {
+        if (cached.isDeleted()) {
+            throw new ResourceNotFoundException("Book", id);
+        }
+        return new ReadResponse<>(CACHE, BookResponse.from(cached.toBook()));
     }
 
     private Author findAuthor(Long authorId) {

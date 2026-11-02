@@ -51,6 +51,8 @@ public class KafkaConfig {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
+        // One consumer thread so notifications appear one-by-one (clearer load-leveling demo).
+        factory.setConcurrency(1);
         return factory;
     }
 }

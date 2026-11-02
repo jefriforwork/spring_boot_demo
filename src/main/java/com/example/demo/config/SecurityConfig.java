@@ -55,6 +55,7 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/books", "/api/v1/books/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/book-notifications").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/books").hasRole("STAFF")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/books/*").hasRole("STAFF")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/books/*").hasRole("STAFF")

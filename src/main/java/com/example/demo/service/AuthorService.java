@@ -18,14 +18,20 @@ public class AuthorService {
     private static final String PRIMARY = "primary (port 5432)";
 
     private final AuthorRepository authorRepository;
+    private final TagService tagService;
 
-    public AuthorService(AuthorRepository authorRepository) {
+    public AuthorService(AuthorRepository authorRepository, TagService tagService) {
         this.authorRepository = authorRepository;
+        this.tagService = tagService;
     }
 
     @Transactional
     public ReadResponse<AuthorResponse> createAuthor(AuthorRequest request) {
-        Author author = authorRepository.save(new Author(request.getName(), request.getCountry()));
+        Author author = new Author(request.getName(), request.getCountry());
+        if (request.getTags() != null) {
+            author.setTags(tagService.resolve(request.getTags()));
+        }
+        author = authorRepository.save(author);
         return new ReadResponse<>(PRIMARY, AuthorResponse.from(author));
     }
 
