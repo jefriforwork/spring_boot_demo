@@ -3,6 +3,7 @@ package com.example.demo.kafka;
 import com.example.demo.service.BookNotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -25,6 +26,8 @@ public class KafkaConsumer {
         try {
             BookEvent event = objectMapper.readValue(message, BookEvent.class);
             bookNotificationService.process(event);
+        } catch (DataIntegrityViolationException e) {
+            log.info("Skipping duplicate book event: {}", message);
         } catch (Exception e) {
             log.warn("Skipping unreadable book event: {}", message, e);
         }

@@ -1,10 +1,13 @@
 package com.example.demo.kafka;
 
+import java.util.UUID;
+
 public class BookEvent {
 
     public static final String TYPE_CREATED = "BOOK_CREATED";
     public static final String TYPE_DELETED = "BOOK_DELETED";
 
+    private UUID eventId;
     private String type;
     private Long bookId;
     private String bookName;
@@ -24,6 +27,14 @@ public class BookEvent {
 
     public static BookEvent deleted(Long bookId) {
         return new BookEvent(TYPE_DELETED, bookId, null);
+    }
+
+    public UUID getEventId() {
+        return eventId;
+    }
+
+    public void setEventId(UUID eventId) {
+        this.eventId = eventId;
     }
 
     public String getType() {

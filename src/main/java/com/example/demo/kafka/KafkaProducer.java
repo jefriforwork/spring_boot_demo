@@ -2,27 +2,32 @@ package com.example.demo.kafka;
 
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Component
 public class KafkaProducer {
 
     public static final String BOOK_EVENTS_TOPIC = "book-events";
 
+    private static final long ACK_TIMEOUT_SECONDS = 10;
+
     private final KafkaTemplate<String, String> kafkaTemplate;
-    private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public KafkaProducer(KafkaTemplate<String, String> kafkaTemplate) {
         this.kafkaTemplate = kafkaTemplate;
     }
 
-    public void send(BookEvent event) {
+    public void sendAndWait(String payload) {
         try {
-            kafkaTemplate.send(BOOK_EVENTS_TOPIC, objectMapper.writeValueAsString(event));
-        } catch (JacksonException e) {
-            throw new IllegalStateException("Failed to serialize book event", e);
+            kafkaTemplate.send(BOOK_EVENTS_TOPIC, payload).get(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while publishing to Kafka", e);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new IllegalStateException("Failed to publish to Kafka", e);
         }
     }
 }

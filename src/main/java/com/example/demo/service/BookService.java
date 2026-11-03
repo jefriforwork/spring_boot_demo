@@ -13,7 +13,6 @@ import com.example.demo.entity.Book;
 import com.example.demo.exception.DuplicateBookNameException;
 import com.example.demo.exception.ResourceNotFoundException;
 import com.example.demo.kafka.BookEvent;
-import com.example.demo.kafka.KafkaProducer;
 import com.example.demo.repository.AuthorRepository;
 import com.example.demo.repository.BookRepository;
 import org.springframework.data.domain.Page;
@@ -29,19 +28,19 @@ public class BookService {
 
     private final BookRepository bookRepository;
     private final AuthorRepository authorRepository;
-    private final KafkaProducer kafkaProducer;
+    private final OutboxService outboxService;
     private final BookCache bookCache;
     private final TagService tagService;
 
     public BookService(
             BookRepository bookRepository,
             AuthorRepository authorRepository,
-            KafkaProducer kafkaProducer,
+            OutboxService outboxService,
             BookCache bookCache,
             TagService tagService) {
         this.bookRepository = bookRepository;
         this.authorRepository = authorRepository;
-        this.kafkaProducer = kafkaProducer;
+        this.outboxService = outboxService;
         this.bookCache = bookCache;
         this.tagService = tagService;
     }
@@ -57,7 +56,7 @@ public class BookService {
             book.setTags(tagService.resolve(request.getTags()));
         }
         book = bookRepository.save(book);
-        kafkaProducer.send(BookEvent.created(book.getId(), book.getName()));
+        outboxService.enqueue(BookEvent.created(book.getId(), book.getName()));
         bookCache.putAfterCommit(book);
         return new ReadResponse<>(PRIMARY, BookResponse.from(book));
     }
@@ -121,7 +120,7 @@ public class BookService {
             throw new ResourceNotFoundException("Book", id);
         }
         bookRepository.deleteById(id);
-        kafkaProducer.send(BookEvent.deleted(id));
+        outboxService.enqueue(BookEvent.deleted(id));
         bookCache.markDeletedAfterCommit(id);
         return new MessageResponse(PRIMARY, "Book deleted successfully");
     }

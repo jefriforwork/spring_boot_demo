@@ -3,6 +3,7 @@ package com.example.demo.entity;
 import jakarta.persistence.*;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(name = "book_notifications")
@@ -11,6 +12,9 @@ public class BookNotification {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "event_id", nullable = false, unique = true)
+    private UUID eventId;
 
     @Column(name = "event_type", nullable = false, length = 32)
     private String eventType;
@@ -30,7 +34,8 @@ public class BookNotification {
     public BookNotification() {
     }
 
-    public BookNotification(String eventType, Long bookId, String bookName, String message) {
+    public BookNotification(UUID eventId, String eventType, Long bookId, String bookName, String message) {
+        this.eventId = eventId;
         this.eventType = eventType;
         this.bookId = bookId;
         this.bookName = bookName;
@@ -40,6 +45,10 @@ public class BookNotification {
 
     public Long getId() {
         return id;
+    }
+
+    public UUID getEventId() {
+        return eventId;
     }
 
     public String getEventType() {
@@ -64,6 +73,10 @@ public class BookNotification {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public void setEventId(UUID eventId) {
+        this.eventId = eventId;
     }
 
     public void setEventType(String eventType) {

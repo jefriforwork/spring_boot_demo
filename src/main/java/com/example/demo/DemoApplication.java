@@ -5,12 +5,14 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
 import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
 import org.springframework.kafka.annotation.EnableKafka;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(exclude = {
     DataSourceAutoConfiguration.class,
     HibernateJpaAutoConfiguration.class
 })
 @EnableKafka
+@EnableScheduling
 public class DemoApplication {
 
     public static void main(String[] args) {

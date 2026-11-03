@@ -29,8 +29,17 @@ public class BookNotificationService {
 
     @Transactional
     public void process(BookEvent event) {
+        if (event.getEventId() == null) {
+            log.warn("Skipping book event without an event id");
+            return;
+        }
+        if (bookNotificationRepository.existsByEventId(event.getEventId())) {
+            log.info("Skipping duplicate book event {}", event.getEventId());
+            return;
+        }
         sleepToSimulateSlowWork();
         BookNotification notification = new BookNotification(
+                event.getEventId(),
                 event.getType(),
                 event.getBookId(),
                 event.getBookName(),
