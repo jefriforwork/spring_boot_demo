@@ -125,14 +125,59 @@ docker start kafka
 
 ## 連線（本機示範）
 
-| 服務 | 位址 | 帳號 / 密碼 |
+| 服務 | `./gradlew bootRun`（Compose） | 叢集裡的 API Pod |
 |------|------|-------------|
-| PostgreSQL 主庫 | `localhost:5432` / `mydb` | `postgres` / `postgres` |
-| PostgreSQL 從庫 | `localhost:5433` / `mydb` | `postgres` / `postgres` |
-| Redis | `localhost:6379` | 無 |
-| Kafka | `localhost:9092` | — |
+| PostgreSQL 主庫 | `localhost:5432` / `mydb` | `postgres-primary:5432` / `mydb` |
+| PostgreSQL 從庫 | `localhost:5433` / `mydb` | `postgres-replica:5432` / `mydb` |
+| Redis | `localhost:6379` | `redis:6379` |
+| Kafka | `localhost:9092` | `kafka-0.kafka.default.svc.cluster.local:9092` |
+| Mailpit | `localhost:1025`，看信頁 `localhost:8025` | `mailpit:1025`，看信頁 `localhost:30025` |
 
-設定在 `src/main/resources/application.properties`。`spring.docker.compose.enabled=false`，應用不會自己拉起 Compose。
+帳號密碼兩邊都是 `postgres` / `postgres`。Redis 與 Kafka 沒有帳號。`bootRun` 的位址在 `application.properties`。叢集那一欄在 `k8s/demo.yaml` 的 ConfigMap，會蓋過 Pod 裡的同一組設定。`spring.docker.compose.enabled=false`，應用不會自己拉起 Compose。
+
+## 在本機 Kubernetes 跑整份系統
+
+這條路徑把 API、PostgreSQL、Redis、Kafka、Mailpit 都放進叢集，彼此用 Service 名字連線，比較接近雲端。雲端的節點沒有 Docker Desktop，也沒有 `host.docker.internal`。
+
+仍需要 Docker Desktop，並在設定裡打開 Kubernetes。它在這裡只是這台 Mac 上的小型叢集。`compose.yaml` 留著給 `./gradlew bootRun`：那條路徑還是連 `localhost` 上的埠，資料庫是另一份，和叢集裡的資料不互通。
+
+叢集裡每個程式是一個 Pod（Kubernetes 拿來跑 container 的盒子）。Pod 會重開、IP 會變。Service 是固定名字，例如 `postgres-primary`、`kafka`。API 的設定在 `k8s/demo.yaml` 的 ConfigMap，連的就是這些名字。
+
+| 誰 | Service 名字 | 叢集內的埠 | 你在 Mac 上怎麼碰到 |
+|---|---|---|---|
+| API | `demo` | `8080` | `http://localhost:30080` |
+| PostgreSQL 主庫 | `postgres-primary` | `5432` | 只給叢集裡的 Pod |
+| PostgreSQL 從庫 | `postgres-replica` | `5432` | 只給叢集裡的 Pod。本機 Compose 的從庫才是 `5433` |
+| Redis | `redis` | `6379` | 只給叢集裡的 Pod |
+| Kafka | Service 名字是 `kafka`。API 連 `kafka-0.kafka.default.svc.cluster.local` | `9092` | 只給叢集裡的 Pod。`kafka-0` 是這組 Pod 裡第一個的固定名字 |
+| Mailpit 看信頁 | `mailpit` | `8025` | `http://localhost:30025` |
+
+先打包 API 映像檔。名稱要和 `k8s/demo.yaml` 裡的 `image: demo:0.0.1` 一致。PostgreSQL、Redis、Kafka、Mailpit 的映像檔會由叢集從 Docker Hub 拉取，不用在這一步建。
+
+```bash
+docker build -t demo:0.0.1 .
+kubectl apply -f k8s/dependencies.yaml
+kubectl apply -f k8s/demo.yaml
+kubectl rollout status statefulset/postgres-primary
+kubectl rollout status deployment/demo
+```
+
+第一次會下載映像檔，從庫還要等主庫就緒後做一次基礎備份。API 的 Pod 會等到主庫、從庫、Redis、Kafka、Mailpit 的埠都開了才啟動 Spring Boot。
+
+```bash
+curl -s http://localhost:30080/actuator/health/readiness
+curl -s http://localhost:30080/api/v1/books
+```
+
+`30080` 和 `./gradlew bootRun` 的 `8080` 不同，兩個可以同時開，但寫進去的是兩份資料庫。叢集裡 API 的副本數是 1，因為 outbox 排程還沒有跨副本的鎖，多開會重複送 Kafka。回應裡的 `dataSource` 仍會寫 `port 5433` / `port 5432`，那是程式裡為本機 Compose 寫死的標籤；叢集裡從庫的 Service 埠是 `5432`。
+
+拆掉叢集裡的 Pod 和 Service。主庫、從庫的磁碟不會跟著檔案一起刪，資料還在。要連資料清掉時，再刪那兩個 PersistentVolumeClaim（磁碟的申請單）：
+
+```bash
+kubectl delete -f k8s/demo.yaml
+kubectl delete -f k8s/dependencies.yaml
+kubectl delete pvc data-postgres-primary-0 data-postgres-replica-0
+```
 
 ## API
 
@@ -204,6 +249,9 @@ books (id, name)
 
 ```
 compose.yaml                          PostgreSQL 主從、Redis、Zookeeper、Kafka
+Dockerfile                            把 API 打成映像檔 demo:0.0.1
+k8s/dependencies.yaml                叢集裡的 PostgreSQL、Redis、ZooKeeper、Kafka、Mailpit
+k8s/demo.yaml                         API 的 Deployment、Service、ConfigMap、Secret
 docker/postgres-primary/init-primary.sh
 docker/postgres-replica/setup-replica.sh
 src/main/java/com/example/demo/
@@ -218,4 +266,4 @@ src/main/resources/
   db/migration/
 ```
 
-讀取路由：`RoutingDataSource` 看 `DbContextHolder`。唯讀交易走從庫（5433），其餘走主庫（5432）。Flyway 只連主庫，變更經 WAL 串流到從庫。
+讀取路由：`RoutingDataSource` 看 `DbContextHolder`。唯讀交易走從庫，其餘走主庫。本機 Compose 把從庫公布在 `5433`，主庫在 `5432`。叢集裡兩個 Service 的埠都是 `5432`，靠名字 `postgres-replica` 和 `postgres-primary` 分開。Flyway 只連主庫，變更經 WAL 串流到從庫。

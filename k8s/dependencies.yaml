@@ -1,0 +1,387 @@
+# 貼近雲端的依賴。這些程式以前由 compose.yaml 跑在叢集外面，
+# API Pod 靠 Docker Desktop 才有的 host.docker.internal 連過去。
+# 這份檔案把每一個程式放進叢集：
+#   Pod        Kubernetes 排程的盒子，裡面才是真正在跑的 container
+#   Service    固定名字。同一個叢集裡的 Pod 把這個名字當主機名
+# 例如 Spring Boot 連 kafka:9092，就是連名叫 kafka 的 Service，再由它轉到 Kafka 的 Pod。
+# 主庫和從庫用 StatefulSet：Pod 重開後，PersistentVolume（一塊保留下來的磁碟）還在。
+# Redis、ZooKeeper、Kafka、Mailpit 沒有掛磁碟，Pod 刪掉後裡面的資料就清空。這個示範可以再啟動、再收訊息。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-primary-init
+data:
+  # 內容與 docker/postgres-primary/init-primary.sh 相同。主庫第一次建資料目錄時會執行它。
+  init-primary.sh: |
+    #!/bin/bash
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
+    CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'replicator';
+    EOSQL
+    echo "host replication replicator 0.0.0.0/0 md5" >> "$PGDATA/pg_hba.conf"
+    pg_ctl reload -D "$PGDATA"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-replica-setup
+data:
+  # 內容與 docker/postgres-replica/setup-replica.sh 相同。
+  # postgres-primary 這個主機名，在叢集裡就是下面那個 Service。
+  setup-replica.sh: |
+    #!/bin/bash
+    set -e
+    if [ ! -s "$PGDATA/PG_VERSION" ]; then
+      until pg_isready -h postgres-primary -p 5432 -U postgres; do
+        sleep 2
+      done
+      rm -rf "${PGDATA:?}"/*
+      PGPASSWORD=replicator pg_basebackup \
+        -h postgres-primary \
+        -p 5432 \
+        -U replicator \
+        -D "$PGDATA" \
+        -Fp -Xs -P -R
+      chown -R postgres:postgres "$PGDATA"
+      chmod 700 "$PGDATA"
+    fi
+    exec docker-entrypoint.sh postgres -c hot_standby=on
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary
+spec:
+  selector:
+    app: postgres-primary
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+spec:
+  serviceName: postgres-primary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-primary
+  template:
+    metadata:
+      labels:
+        app: postgres-primary
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: postgres
+            - name: POSTGRES_DB
+              value: mydb
+            # 磁碟掛在 /var/lib/postgresql/data。資料放進子目錄，避免這層目錄的擁有者不是 postgres。
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          args:
+            - postgres
+            - -c
+            - wal_level=replica
+            - -c
+            - max_wal_senders=3
+            - -c
+            - max_replication_slots=3
+            - -c
+            - hot_standby=on
+            - -c
+            - listen_addresses=*
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 5
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-primary-init
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-replica
+spec:
+  selector:
+    app: postgres-replica
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-replica
+spec:
+  serviceName: postgres-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-replica
+  template:
+    metadata:
+      labels:
+        app: postgres-replica
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: postgres
+            - name: PGUSER
+              value: postgres
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          command: ["/bin/bash", "/scripts/setup-replica.sh"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: setup
+              mountPath: /scripts
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 5
+            failureThreshold: 30
+      volumes:
+        - name: setup
+          configMap:
+            name: postgres-replica-setup
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+spec:
+  selector:
+    app: zookeeper
+  ports:
+    - name: client
+      port: 2181
+      targetPort: 2181
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zookeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+        - name: zookeeper
+          image: confluentinc/cp-zookeeper:7.5.0
+          ports:
+            - containerPort: 2181
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "2181"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "2000"
+          readinessProbe:
+            tcpSocket:
+              port: 2181
+            periodSeconds: 5
+---
+# clusterIP: None 表示這是 headless Service：名字直接解析成 Pod 的 IP，中間沒有另一個轉送用的虛擬 IP。
+# Kafka 連線後會要求客戶端改連「我宣布的那個 broker 位址」，所以這個 Pod 需要一個不會變的名字。
+# StatefulSet 會把第一個 Pod 固定叫 kafka-0，DNS 名字是 kafka-0.kafka.default.svc.cluster.local。
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  clusterIP: None
+  selector:
+    app: kafka
+  ports:
+    - name: client
+      port: 9092
+      targetPort: 9092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      initContainers:
+        - name: wait-for-zookeeper
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -w 1 zookeeper 2181 </dev/null; do
+                echo "waiting for zookeeper:2181"
+                sleep 2
+              done
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:7.5.0
+          ports:
+            - containerPort: 9092
+          env:
+            - name: KAFKA_BROKER_ID
+              value: "1"
+            - name: KAFKA_ZOOKEEPER_CONNECT
+              value: zookeeper:2181
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: PLAINTEXT:PLAINTEXT
+            - name: KAFKA_LISTENERS
+              value: PLAINTEXT://0.0.0.0:9092
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: PLAINTEXT://kafka-0.kafka.default.svc.cluster.local:9092
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: PLAINTEXT
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xmx512M -Xms512M"
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+spec:
+  # NodePort 在這台機器開一個固定埠，瀏覽器才進得了看信頁。
+  # SMTP 1025 是給叢集裡的 API 寄信；網頁 8025 對應本機的 30025。
+  type: NodePort
+  selector:
+    app: mailpit
+  ports:
+    - name: smtp
+      port: 1025
+      targetPort: 1025
+    - name: ui
+      port: 8025
+      targetPort: 8025
+      nodePort: 30025
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mailpit
+  template:
+    metadata:
+      labels:
+        app: mailpit
+    spec:
+      containers:
+        - name: mailpit
+          image: axllent/mailpit:v1.21
+          ports:
+            - name: smtp
+              containerPort: 1025
+            - name: ui
+              containerPort: 8025
+          readinessProbe:
+            tcpSocket:
+              port: 8025
+            periodSeconds: 5

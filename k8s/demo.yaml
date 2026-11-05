@@ -1,0 +1,106 @@
+# API 跑在叢集裡，連線位址用 Service 名字（見 k8s/dependencies.yaml）。
+# Service 是固定入口；同一個命名空間裡的 Pod 可以把這個名字當主機名。
+# 從庫在叢集裡自己的埠仍是 5432。本機 Compose 才把從庫公布成 5433，因為一台電腦的 5432 只能給一個程式。
+# application.properties 仍然是 ./gradlew bootRun 的位址，這份 ConfigMap 只蓋掉叢集裡那個 Pod 的環境變數。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo
+data:
+  APP_DATASOURCE_PRIMARY_URL: jdbc:postgresql://postgres-primary:5432/mydb
+  APP_DATASOURCE_PRIMARY_USERNAME: postgres
+  APP_DATASOURCE_REPLICA_URL: jdbc:postgresql://postgres-replica:5432/mydb
+  APP_DATASOURCE_REPLICA_USERNAME: postgres
+  SPRING_FLYWAY_URL: jdbc:postgresql://postgres-primary:5432/mydb
+  SPRING_FLYWAY_USER: postgres
+  SPRING_DATA_REDIS_HOST: redis
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka-0.kafka.default.svc.cluster.local:9092
+  SPRING_MAIL_HOST: mailpit
+  APP_INVITE_ACCEPT_URL: http://localhost:30080/api/v1/auth/accept-invite
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: demo
+type: Opaque
+stringData:
+  APP_DATASOURCE_PRIMARY_PASSWORD: postgres
+  APP_DATASOURCE_REPLICA_PASSWORD: postgres
+  SPRING_FLYWAY_PASSWORD: postgres
+  APP_SECURITY_JWT_SECRET: demo-secret-key-must-be-32-bytes!
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      # 埠開了才代表那個 Service 後面有程式在聽。資料庫、Kafka 映像檔第一次下載會比較久，這裡會一直等。
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              wait_for() {
+                until nc -w 1 "$1" "$2" </dev/null; do
+                  echo "waiting for $1:$2"
+                  sleep 2
+                done
+              }
+              wait_for postgres-primary 5432
+              wait_for postgres-replica 5432
+              wait_for redis 6379
+              wait_for kafka-0.kafka.default.svc.cluster.local 9092
+              wait_for mailpit 1025
+      containers:
+        - name: demo
+          image: demo:0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: demo
+            - secretRef:
+                name: demo
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+spec:
+  type: NodePort
+  selector:
+    app: demo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30080
