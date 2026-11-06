@@ -164,10 +164,20 @@ kubectl rollout status deployment/demo
 
 第一次會下載映像檔，從庫還要等主庫就緒後做一次基礎備份。API 的 Pod 會等到主庫、從庫、Redis、Kafka、Mailpit 的埠都開了才啟動 Spring Boot。
 
+Service `demo` 的型別是 **NodePort**：它在叢集那台 Linux 節點上開 `30080`，再轉到 Pod 裡 Spring Boot 的 `8080`。Docker Desktop 這個叢集的節點是 `desktop-control-plane`，那個 `30080` 不會自動出現在 Mac 的 `localhost`。要在 Mac 上呼叫，另開一個終端機，把本機的 `30080` 轉進 Service：
+
+```bash
+kubectl port-forward service/demo 30080:8080
+```
+
+這條指令會佔住那個終端機。轉送還在跑的時候，再打：
+
 ```bash
 curl -s http://localhost:30080/actuator/health/readiness
 curl -s http://localhost:30080/api/v1/books
 ```
+
+`localhost:8080` 是另一條路，要另外執行 `./gradlew bootRun`，而且要先 `docker compose up -d`。只跑上面的 `docker build` 和 `kubectl apply` 不會打開 `8080`。
 
 `30080` 和 `./gradlew bootRun` 的 `8080` 不同，兩個可以同時開，但寫進去的是兩份資料庫。叢集裡 API 的副本數是 1，因為 outbox 排程還沒有跨副本的鎖，多開會重複送 Kafka。回應裡的 `dataSource` 仍會寫 `port 5433` / `port 5432`，那是程式裡為本機 Compose 寫死的標籤；叢集裡從庫的 Service 埠是 `5432`。
 

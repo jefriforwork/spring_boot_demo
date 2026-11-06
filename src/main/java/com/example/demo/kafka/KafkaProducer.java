@@ -11,6 +11,7 @@ import java.util.concurrent.TimeoutException;
 public class KafkaProducer {
 
     public static final String BOOK_EVENTS_TOPIC = "book-events";
+    public static final String BOOK_EVENTS_DLT_TOPIC = BOOK_EVENTS_TOPIC + ".DLT";
 
     private static final long ACK_TIMEOUT_SECONDS = 10;
 

@@ -28,8 +28,6 @@ public class KafkaConsumer {
             bookNotificationService.process(event);
         } catch (DataIntegrityViolationException e) {
             log.info("Skipping duplicate book event: {}", message);
-        } catch (Exception e) {
-            log.warn("Skipping unreadable book event: {}", message, e);
         }
     }
 }
